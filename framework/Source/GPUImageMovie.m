@@ -1,13 +1,10 @@
 #import "GPUImageMovie.h"
-#import "GPUImageMovieWriter.h"
 #import "GPUImageFilter.h"
 #import "GPUImageColorConversion.h"
-
+#import "GPUImageMovieWriter.h"
 
 @interface GPUImageMovie () <AVPlayerItemOutputPullDelegate>
 {
-    BOOL audioEncodingIsFinished, videoEncodingIsFinished;
-    GPUImageMovieWriter *synchronizedMovieWriter;
     AVAssetReader *reader;
     AVPlayerItemVideoOutput *playerItemOutput;
 #if TARGET_IPHONE_SIMULATOR || TARGET_OS_IPHONE
@@ -17,7 +14,6 @@
 #endif
     CMTime previousFrameTime, processingFrameTime;
     CFAbsoluteTime previousActualFrameTime;
-    BOOL keepLooping;
 
     GLuint luminanceTexture, chrominanceTexture;
 
@@ -44,6 +40,8 @@
 @synthesize playAtActualSpeed = _playAtActualSpeed;
 @synthesize delegate = _delegate;
 @synthesize shouldRepeat = _shouldRepeat;
+@synthesize audioEncodingIsFinished = _audioEncodingIsFinished;
+@synthesize videoEncodingIsFinished = _videoEncodingIsFinished;
 
 #pragma mark -
 #pragma mark Initialization and teardown
@@ -59,6 +57,8 @@
 
     self.url = url;
     self.asset = nil;
+    self.synchronizedDecoding = NO;
+    self.shouldDecodingAudio = NO;
 
     return self;
 }
@@ -74,6 +74,8 @@
 
     self.url = nil;
     self.asset = asset;
+    self.synchronizedDecoding = NO;
+    self.shouldDecodingAudio = NO;
 
     return self;
 }
@@ -90,6 +92,8 @@
     self.url = nil;
     self.asset = nil;
     self.playerItem = playerItem;
+    self.synchronizedDecoding = NO;
+    self.shouldDecodingAudio = NO;
 
     return self;
 }
@@ -152,31 +156,63 @@
 #pragma mark -
 #pragma mark Movie processing
 
-- (void)enableSynchronizedEncodingUsingMovieWriter:(GPUImageMovieWriter *)movieWriter;
-{
-    synchronizedMovieWriter = movieWriter;
-    movieWriter.encodingLiveVideo = NO;
+- (void)startProcessing {
+    [self startProcessingWithCompletion:NULL];
 }
 
-- (void)startProcessing
+- (void)startProcessingWithCompletion:(void (^)(BOOL success))completion
 {
-    if( self.playerItem ) {
+    if ( self.playerItem ) {
         [self processPlayerItem];
+        if (completion) {
+            completion(YES);
+        }
         return;
     }
-    if(self.url == nil)
-    {
-      [self processAsset];
-      return;
+    
+    if (self.url == nil) {
+        if (self.asset == nil) {
+            self.status = GPUImageMovieStatusFail;
+            if (completion) {
+                completion(NO);
+            }
+            return;
+        }
+        
+        NSError *error = nil;
+        AVKeyValueStatus tracksStatus = [_asset statusOfValueForKey:@"tracks" error:&error];
+        if (error) {
+            self.status = GPUImageMovieStatusFail;
+            if (completion) {
+                completion(NO);
+            }
+            return;
+        }
+        
+        if (tracksStatus != AVKeyValueStatusLoaded) {
+            [self loadAssetTrack:(AVURLAsset *)_asset completion:completion];
+        }
+        else {
+            [self processAsset];
+            if (completion) {
+                completion(YES);
+            }
+        }
+        
+        return;
     }
     
-    if (_shouldRepeat) keepLooping = YES;
+    NSDictionary *inputOptions = [NSDictionary dictionaryWithObject:@(YES) forKey:AVURLAssetPreferPreciseDurationAndTimingKey];
+    AVURLAsset *inputAsset = [[AVURLAsset alloc] initWithURL:self.url options:inputOptions];
     
+    [self loadAssetTrack:inputAsset completion:completion];
+}
+
+- (void)loadAssetTrack:(AVURLAsset *)inputAsset completion:(void (^)(BOOL success))completion {
     previousFrameTime = kCMTimeZero;
     previousActualFrameTime = CFAbsoluteTimeGetCurrent();
-  
-    NSDictionary *inputOptions = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES] forKey:AVURLAssetPreferPreciseDurationAndTimingKey];
-    AVURLAsset *inputAsset = [[AVURLAsset alloc] initWithURL:self.url options:inputOptions];
+    
+    self.status = GPUImageMovieStatusLoading;
     
     GPUImageMovie __block *blockSelf = self;
     
@@ -186,11 +222,20 @@
             AVKeyValueStatus tracksStatus = [inputAsset statusOfValueForKey:@"tracks" error:&error];
             if (tracksStatus != AVKeyValueStatusLoaded)
             {
+                blockSelf.status = GPUImageMovieStatusFail;
+                if (completion) {
+                    completion(NO);
+                }
                 return;
             }
+            
             blockSelf.asset = inputAsset;
             [blockSelf processAsset];
             blockSelf = nil;
+            
+            if (completion) {
+                completion(YES);
+            }
         });
     }];
 }
@@ -211,12 +256,16 @@
     }
     
     // Maybe set alwaysCopiesSampleData to NO on iOS 5.0 for faster video decoding
-    AVAssetReaderTrackOutput *readerVideoTrackOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:[[self.asset tracksWithMediaType:AVMediaTypeVideo] objectAtIndex:0] outputSettings:outputSettings];
+    AVAssetTrack *videoTrack = [[self.asset tracksWithMediaType:AVMediaTypeVideo] firstObject];
+    NSParameterAssert(videoTrack);
+    self.outputOrientation = [self orientationOfVideoTrack:videoTrack];
+    AVAssetReaderTrackOutput *readerVideoTrackOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:videoTrack outputSettings:outputSettings];
     readerVideoTrackOutput.alwaysCopiesSampleData = NO;
+    NSParameterAssert([assetReader canAddOutput:readerVideoTrackOutput]);
     [assetReader addOutput:readerVideoTrackOutput];
-
+    
     NSArray *audioTracks = [self.asset tracksWithMediaType:AVMediaTypeAudio];
-    BOOL shouldRecordAudioTrack = (([audioTracks count] > 0) && (self.audioEncodingTarget != nil) );
+    BOOL shouldRecordAudioTrack = (([audioTracks count] > 0) && ((self.audioEncodingTarget != nil) || _shouldDecodingAudio) );
     AVAssetReaderTrackOutput *readerAudioTrackOutput = nil;
 
     if (shouldRecordAudioTrack)
@@ -237,6 +286,31 @@
     return assetReader;
 }
 
+- (GPUImageRotationMode)orientationOfVideoTrack:(AVAssetTrack *)videoTrack {
+    CGAffineTransform transform = [videoTrack preferredTransform];
+    CGFloat radians = atan2(transform.b, transform.a);
+    int degrees  = roundf(radians * 180.0f / M_PI);
+
+    switch (degrees) {
+        case 0:
+            return kGPUImageNoRotation;
+            break;
+        case 90:
+            return kGPUImageRotateRight;
+            break;
+        case 180:
+            return kGPUImageRotate180;
+            break;
+        case 270:
+        case -90:
+            return kGPUImageRotateLeft;
+            break;
+        default:
+            return kGPUImageNoRotation;
+            break;
+    }
+}
+
 - (void)processAsset
 {
     reader = [self createAssetReader];
@@ -244,10 +318,10 @@
     AVAssetReaderOutput *readerVideoTrackOutput = nil;
     AVAssetReaderOutput *readerAudioTrackOutput = nil;
 
-    audioEncodingIsFinished = YES;
+    self.audioEncodingIsFinished = YES;
     for( AVAssetReaderOutput *output in reader.outputs ) {
         if( [output.mediaType isEqualToString:AVMediaTypeAudio] ) {
-            audioEncodingIsFinished = NO;
+            self.audioEncodingIsFinished = NO;
             readerAudioTrackOutput = output;
         }
         else if( [output.mediaType isEqualToString:AVMediaTypeVideo] ) {
@@ -257,57 +331,42 @@
 
     if ([reader startReading] == NO) 
     {
-            NSLog(@"Error reading from file at URL: %@", self.url);
+        NSLog(@"Error reading from file at URL: %@", self.url);
+        self.status = GPUImageMovieStatusFail;
+        [self endProcessing];
         return;
     }
 
-    __unsafe_unretained GPUImageMovie *weakSelf = self;
+    self.status = GPUImageMovieStatusPlaying;
+    NSLog(@"Start reading...");
 
-    if (synchronizedMovieWriter != nil)
-    {
-        [synchronizedMovieWriter setVideoInputReadyCallback:^{
-            BOOL success = [weakSelf readNextVideoFrameFromOutput:readerVideoTrackOutput];
-#if TARGET_IPHONE_SIMULATOR || TARGET_OS_IPHONE
-            return success;
-#endif
-        }];
-
-        [synchronizedMovieWriter setAudioInputReadyCallback:^{
-            BOOL success = [weakSelf readNextAudioSampleFromOutput:readerAudioTrackOutput];
-#if TARGET_IPHONE_SIMULATOR || TARGET_OS_IPHONE
-            return success;
-#endif
-        }];
+    if (!_synchronizedDecoding) {
         
-        [synchronizedMovieWriter enableSynchronizationCallbacks];
-
-    }
-    else
-    {
-        while (reader.status == AVAssetReaderStatusReading && (!_shouldRepeat || keepLooping))
+        __unsafe_unretained GPUImageMovie *weakSelf = self;
+        while (reader.status == AVAssetReaderStatusReading)
         {
                 [weakSelf readNextVideoFrameFromOutput:readerVideoTrackOutput];
 
-            if ( (readerAudioTrackOutput) && (!audioEncodingIsFinished) )
+            if ( (readerAudioTrackOutput) && (!self.audioEncodingIsFinished) )
             {
-                    [weakSelf readNextAudioSampleFromOutput:readerAudioTrackOutput];
+                [weakSelf readNextAudioSampleFromOutput:readerAudioTrackOutput];
             }
-
         }
 
         if (reader.status == AVAssetReaderStatusCompleted) {
-                
+            
+            weakSelf.status = GPUImageMovieStatusFinish;
+            
             [reader cancelReading];
 
-            if (keepLooping) {
+            if (_shouldRepeat) {
                 reader = nil;
-                dispatch_async(dispatch_get_main_queue(), ^{
+                runOnMainQueueWithoutDeadlocking(^{
                     [self startProcessing];
                 });
             } else {
                 [weakSelf endProcessing];
             }
-
         }
     }
 }
@@ -344,7 +403,7 @@
         }
         playerItemOutput = [[AVPlayerItemVideoOutput alloc] initWithPixelBufferAttributes:pixBuffAttributes];
         [playerItemOutput setDelegate:self queue:videoProcessingQueue];
-
+        
         [_playerItem addOutput:playerItemOutput];
         [playerItemOutput requestNotificationOfMediaDataChangeWithAdvanceInterval:0.1];
     });
@@ -412,18 +471,36 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
     }
 }
 
+- (BOOL)readNextVideoFrameFromCurrentOutput {
+    
+    if ([reader status] != AVAssetReaderStatusReading) {
+        NSLog(@"Error reading from file at URL: %@ status: %ld", self.url,reader.status);
+        return NO;
+    }
+    
+    AVAssetReaderOutput *readerVideoTrackOutput = nil;
+    for( AVAssetReaderOutput *output in reader.outputs ) {
+        if( [output.mediaType isEqualToString:AVMediaTypeVideo] ) {
+            readerVideoTrackOutput = output;
+            break;
+        }
+    }
+    
+    return [self readNextVideoFrameFromOutput:readerVideoTrackOutput];
+}
+
 - (BOOL)readNextVideoFrameFromOutput:(AVAssetReaderOutput *)readerVideoTrackOutput;
 {
-    if (reader.status == AVAssetReaderStatusReading && ! videoEncodingIsFinished)
+    if (reader.status == AVAssetReaderStatusReading && ! self.videoEncodingIsFinished)
     {
         CMSampleBufferRef sampleBufferRef = [readerVideoTrackOutput copyNextSampleBuffer];
         if (sampleBufferRef) 
         {
-            //NSLog(@"read a video frame: %@", CFBridgingRelease(CMTimeCopyDescription(kCFAllocatorDefault, CMSampleBufferGetOutputPresentationTimeStamp(sampleBufferRef))));
+            CMTime currentSampleTime = CMSampleBufferGetOutputPresentationTimeStamp(sampleBufferRef);
+            NSLog(@"read a video frame: %@", CFBridgingRelease(CMTimeCopyDescription(kCFAllocatorDefault, CMSampleBufferGetOutputPresentationTimeStamp(sampleBufferRef))));
             if (_playAtActualSpeed)
             {
                 // Do this outside of the video processing queue to not slow that down while waiting
-                CMTime currentSampleTime = CMSampleBufferGetOutputPresentationTimeStamp(sampleBufferRef);
                 CMTime differenceFromLastFrame = CMTimeSubtract(currentSampleTime, previousFrameTime);
                 CFAbsoluteTime currentActualTime = CFAbsoluteTimeGetCurrent();
                 
@@ -438,71 +515,99 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
                 previousFrameTime = currentSampleTime;
                 previousActualFrameTime = CFAbsoluteTimeGetCurrent();
             }
-
+            
+            if ([_delegate respondsToSelector:@selector(GPUImageMovie:shouldProcessVideoSampleBuffer:frameTime:)]) {
+                if ([_delegate GPUImageMovie:self shouldProcessVideoSampleBuffer:sampleBufferRef frameTime:currentSampleTime] == NO) {
+                    CMSampleBufferInvalidate(sampleBufferRef);
+                    CFRelease(sampleBufferRef);
+                    return YES;
+                }
+            }
+            
             __unsafe_unretained GPUImageMovie *weakSelf = self;
             runSynchronouslyOnVideoProcessingQueue(^{
                 [weakSelf processMovieFrame:sampleBufferRef];
                 CMSampleBufferInvalidate(sampleBufferRef);
                 CFRelease(sampleBufferRef);
             });
-
             return YES;
         }
         else
         {
-            if (!keepLooping) {
-                videoEncodingIsFinished = YES;
-                if( videoEncodingIsFinished && audioEncodingIsFinished )
+            if (!_shouldRepeat) {
+                self.videoEncodingIsFinished = YES;
+                if( self.videoEncodingIsFinished && self.audioEncodingIsFinished ) {
+                    self.status = GPUImageMovieStatusFinish;
                     [self endProcessing];
+                }
             }
-        }
-    }
-    else if (synchronizedMovieWriter != nil)
-    {
-        if (reader.status == AVAssetReaderStatusCompleted)
-        {
-            [self endProcessing];
         }
     }
     return NO;
 }
 
+- (BOOL)readNextAudioSampleFromCurrentOutput {
+    
+    if ([reader status] != AVAssetReaderStatusReading) {
+        NSLog(@"Error reading from file at URL: %@ status: %ld", self.url,reader.status);
+        return NO;
+    }
+    
+    AVAssetReaderOutput *readerAudioTrackOutput = nil;
+    for( AVAssetReaderOutput *output in reader.outputs ) {
+        if( [output.mediaType isEqualToString:AVMediaTypeAudio] ) {
+            readerAudioTrackOutput = output;
+            break;
+        }
+    }
+    
+    return [self readNextAudioSampleFromOutput:readerAudioTrackOutput];
+}
+
 - (BOOL)readNextAudioSampleFromOutput:(AVAssetReaderOutput *)readerAudioTrackOutput;
 {
-    if (reader.status == AVAssetReaderStatusReading && ! audioEncodingIsFinished)
+    if (reader.status == AVAssetReaderStatusReading && ! self.audioEncodingIsFinished)
     {
         CMSampleBufferRef audioSampleBufferRef = [readerAudioTrackOutput copyNextSampleBuffer];
         if (audioSampleBufferRef)
         {
-            //NSLog(@"read an audio frame: %@", CFBridgingRelease(CMTimeCopyDescription(kCFAllocatorDefault, CMSampleBufferGetOutputPresentationTimeStamp(audioSampleBufferRef))));
+            NSLog(@"read an audio frame: %@", CFBridgingRelease(CMTimeCopyDescription(kCFAllocatorDefault, CMSampleBufferGetOutputPresentationTimeStamp(audioSampleBufferRef))));
+            CMTime currentSampleTime = CMSampleBufferGetOutputPresentationTimeStamp(audioSampleBufferRef);
+            if ([_delegate respondsToSelector:@selector(GPUImageMovie:shouldProcessAudioSampleBuffer:frameTime:)]) {
+                if ([_delegate GPUImageMovie:self shouldProcessAudioSampleBuffer:audioSampleBufferRef frameTime:currentSampleTime] == NO) {
+                    CFRelease(audioSampleBufferRef);
+                    return YES;
+                }
+            }
+            
             [self.audioEncodingTarget processAudioBuffer:audioSampleBufferRef];
             CFRelease(audioSampleBufferRef);
             return YES;
         }
         else
         {
-            if (!keepLooping) {
-                audioEncodingIsFinished = YES;
-                if( videoEncodingIsFinished && audioEncodingIsFinished )
+            if (!_shouldRepeat) {
+                self.audioEncodingIsFinished = YES;
+                if( self.videoEncodingIsFinished && self.audioEncodingIsFinished ) {
+                    self.status = GPUImageMovieStatusFinish;
                     [self endProcessing];
+                }
             }
         }
     }
-    else if (synchronizedMovieWriter != nil)
-    {
-        if (reader.status == AVAssetReaderStatusCompleted || reader.status == AVAssetReaderStatusFailed ||
-            reader.status == AVAssetReaderStatusCancelled)
-        {
-            [self endProcessing];
-        }
-    }
+//    else if (synchronizedMovieWriter != nil)
+//    {
+//        if (reader.status == AVAssetReaderStatusCompleted || reader.status == AVAssetReaderStatusFailed ||
+//            reader.status == AVAssetReaderStatusCancelled)
+//        {
+//            [self endProcessing];
+//        }
+//    }
     return NO;
 }
 
 - (void)processMovieFrame:(CMSampleBufferRef)movieSampleBuffer; 
 {
-//    CMTimeGetSeconds
-//    CMTimeSubtract
     
     CMTime currentSampleTime = CMSampleBufferGetOutputPresentationTimeStamp(movieSampleBuffer);
     CVImageBufferRef movieFrame = CMSampleBufferGetImageBuffer(movieSampleBuffer);
@@ -670,6 +775,7 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
             {
                 NSInteger indexOfObject = [targets indexOfObject:currentTarget];
                 NSInteger targetTextureIndex = [[targetTextureIndices objectAtIndex:indexOfObject] integerValue];
+                [currentTarget setInputRotation:_outputOrientation atIndex:targetTextureIndex];
                 [currentTarget setInputSize:CGSizeMake(bufferWidth, bufferHeight) atIndex:targetTextureIndex];
                 [currentTarget setInputFramebuffer:outputFramebuffer atIndex:targetTextureIndex];
             }
@@ -749,6 +855,7 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
         {
             NSInteger indexOfObject = [targets indexOfObject:currentTarget];
             NSInteger targetTextureIndex = [[targetTextureIndices objectAtIndex:indexOfObject] integerValue];
+            [currentTarget setInputRotation:_outputOrientation atIndex:targetTextureIndex];
             [currentTarget setInputSize:CGSizeMake(bufferWidth, bufferHeight) atIndex:targetTextureIndex];
             [currentTarget setInputFramebuffer:outputFramebuffer atIndex:targetTextureIndex];
         }
@@ -773,7 +880,6 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
 
 - (void)endProcessing;
 {
-    keepLooping = NO;
 #if TARGET_IPHONE_SIMULATOR || TARGET_OS_IPHONE
     [displayLink setPaused:YES];
 #else
@@ -783,18 +889,6 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
     for (id<GPUImageInput> currentTarget in targets)
     {
         [currentTarget endProcessing];
-    }
-    
-    if (synchronizedMovieWriter != nil)
-    {
-#if TARGET_IPHONE_SIMULATOR || TARGET_OS_IPHONE
-        [synchronizedMovieWriter setVideoInputReadyCallback:^{return NO;}];
-        [synchronizedMovieWriter setAudioInputReadyCallback:^{return NO;}];
-#else
-        // I'm not sure about this, meybe setting a nil will be more appropriate then an empty block
-        [synchronizedMovieWriter setVideoInputReadyCallback:^{}];
-        [synchronizedMovieWriter setAudioInputReadyCallback:^{}];
-#endif
     }
     
     if (self.playerItem && (displayLink != nil))
@@ -808,10 +902,9 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
 #endif
     }
 
-    if ([self.delegate respondsToSelector:@selector(didCompletePlayingMovie)]) {
-        [self.delegate didCompletePlayingMovie];
+    if ([self.delegate respondsToSelector:@selector(GPUImageMovieDidEndPlaying:status:)]) {
+        [self.delegate GPUImageMovieDidEndPlaying:self status:self.status];
     }
-    self.delegate = nil;
 }
 
 - (void)cancelProcessing
@@ -819,6 +912,7 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
     if (reader) {
         [reader cancelReading];
     }
+    self.status = GPUImageMovieStatusCancelled;
     [self endProcessing];
 }
 
@@ -863,14 +957,6 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
 
 - (AVAssetReader*)assetReader {
     return reader;
-}
-
-- (BOOL)audioEncodingIsFinished {
-    return audioEncodingIsFinished;
-}
-
-- (BOOL)videoEncodingIsFinished {
-    return videoEncodingIsFinished;
 }
 
 @end

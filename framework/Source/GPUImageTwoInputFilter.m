@@ -42,7 +42,7 @@ NSString *const kGPUImageTwoInputTextureVertexShaderString = SHADER_STRING
     
     inputRotation2 = kGPUImageNoRotation;
     
-    hasSetFirstTexture = NO;
+    hasSetFirstTarget = NO;
     
     hasReceivedFirstFrame = NO;
     hasReceivedSecondFrame = NO;
@@ -133,7 +133,7 @@ NSString *const kGPUImageTwoInputTextureVertexShaderString = SHADER_STRING
 
 - (NSInteger)nextAvailableTextureIndex;
 {
-    if (hasSetFirstTexture)
+    if (hasSetFirstTarget)
     {
         return 1;
     }
@@ -143,12 +143,36 @@ NSString *const kGPUImageTwoInputTextureVertexShaderString = SHADER_STRING
     }
 }
 
+- (void)addTarget:(id<GPUImageInput>)newTarget atTextureLocation:(NSInteger)textureLocation {
+    [super addTarget:newTarget atTextureLocation:textureLocation];
+    
+    if (textureLocation == 0) {
+        hasSetFirstTarget = YES;
+    }
+}
+
+- (void)removeTarget:(id<GPUImageInput>)targetToRemove {
+    
+    NSInteger indexOfObject = [targets indexOfObject:targetToRemove];
+    NSInteger textureIndexOfTarget = [[targetTextureIndices objectAtIndex:indexOfObject] integerValue];
+    
+    [super removeTarget:targetToRemove];
+    
+    if (textureIndexOfTarget == 0) {
+        hasSetFirstTarget = NO;
+    }
+}
+
+- (void)removeAllTargets {
+    [super removeAllTargets];
+    hasSetFirstTarget = NO;
+}
+
 - (void)setInputFramebuffer:(GPUImageFramebuffer *)newInputFramebuffer atIndex:(NSInteger)textureIndex;
 {
     if (textureIndex == 0)
     {
         firstInputFramebuffer = newInputFramebuffer;
-        hasSetFirstTexture = YES;
         [firstInputFramebuffer lock];
     }
     else
@@ -163,11 +187,6 @@ NSString *const kGPUImageTwoInputTextureVertexShaderString = SHADER_STRING
     if (textureIndex == 0)
     {
         [super setInputSize:newSize atIndex:textureIndex];
-        
-        if (CGSizeEqualToSize(newSize, CGSizeZero))
-        {
-            hasSetFirstTexture = NO;
-        }
     }
 }
 

@@ -48,7 +48,7 @@ NSString *const kGPUImageFourInputTextureVertexShaderString = SHADER_STRING
     
     inputRotation4 = kGPUImageNoRotation;
     
-    hasSetThirdTexture = NO;
+    hasSetThirdTarget = NO;
     
     hasReceivedFourthFrame = NO;
     fourthFrameWasVideo = NO;
@@ -143,15 +143,15 @@ NSString *const kGPUImageFourInputTextureVertexShaderString = SHADER_STRING
 
 - (NSInteger)nextAvailableTextureIndex;
 {
-    if (hasSetThirdTexture)
+    if (hasSetThirdTarget)
     {
         return 3;
     }
-    else if (hasSetSecondTexture)
+    else if (hasSetSecondTarget)
     {
         return 2;
     }
-    else if (hasSetFirstTexture)
+    else if (hasSetFirstTarget)
     {
         return 1;
     }
@@ -161,57 +161,52 @@ NSString *const kGPUImageFourInputTextureVertexShaderString = SHADER_STRING
     }
 }
 
+- (void)addTarget:(id<GPUImageInput>)newTarget atTextureLocation:(NSInteger)textureLocation {
+    [super addTarget:newTarget atTextureLocation:textureLocation];
+    
+    if (textureLocation == 2) {
+        hasSetThirdTarget = YES;
+    }
+}
+
+- (void)removeTarget:(id<GPUImageInput>)targetToRemove {
+    
+    NSInteger indexOfObject = [targets indexOfObject:targetToRemove];
+    NSInteger textureIndexOfTarget = [[targetTextureIndices objectAtIndex:indexOfObject] integerValue];
+    
+    [super removeTarget:targetToRemove];
+    
+    if (textureIndexOfTarget == 2) {
+        hasSetThirdTarget = NO;
+    }
+}
+
+- (void)removeAllTargets {
+    [super removeAllTargets];
+    hasSetThirdTarget = NO;
+}
+
 - (void)setInputFramebuffer:(GPUImageFramebuffer *)newInputFramebuffer atIndex:(NSInteger)textureIndex;
 {
     if (textureIndex == 0)
     {
         firstInputFramebuffer = newInputFramebuffer;
-        hasSetFirstTexture = YES;
         [firstInputFramebuffer lock];
     }
     else if (textureIndex == 1)
     {
         secondInputFramebuffer = newInputFramebuffer;
-        hasSetSecondTexture = YES;
         [secondInputFramebuffer lock];
     }
     else if (textureIndex == 2)
     {
         thirdInputFramebuffer = newInputFramebuffer;
-        hasSetThirdTexture = YES;
         [thirdInputFramebuffer lock];
     }
     else
     {
         fourthInputFramebuffer = newInputFramebuffer;
         [fourthInputFramebuffer lock];
-    }
-}
-
-- (void)setInputSize:(CGSize)newSize atIndex:(NSInteger)textureIndex;
-{
-    if (textureIndex == 0)
-    {
-        [super setInputSize:newSize atIndex:textureIndex];
-        
-        if (CGSizeEqualToSize(newSize, CGSizeZero))
-        {
-            hasSetFirstTexture = NO;
-        }
-    }
-    else if (textureIndex == 1)
-    {
-        if (CGSizeEqualToSize(newSize, CGSizeZero))
-        {
-            hasSetSecondTexture = NO;
-        }
-    }
-    else if (textureIndex == 2)
-    {
-        if (CGSizeEqualToSize(newSize, CGSizeZero))
-        {
-            hasSetThirdTexture = NO;
-        }
     }
 }
 

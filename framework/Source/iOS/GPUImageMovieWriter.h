@@ -4,11 +4,18 @@
 
 extern NSString *const kGPUImageColorSwizzlingFragmentShaderString;
 
+@class GPUImageMovieWriter;
 @protocol GPUImageMovieWriterDelegate <NSObject>
 
 @optional
-- (void)movieRecordingCompleted;
-- (void)movieRecordingFailedWithError:(NSError*)error;
+- (void)GPUImageMovieWriter:(GPUImageMovieWriter *)movieWriter didAppendVideoFrameAtTime:(CMTime)frameTime;
+- (void)GPUImageMovieWriter:(GPUImageMovieWriter *)movieWriter didDropVideoFrameAtTime:(CMTime)frameTime;
+
+- (void)GPUImageMovieWriter:(GPUImageMovieWriter *)movieWriter didAppendAudioFrameAtTime:(CMTime)frameTime;
+- (void)GPUImageMovieWriter:(GPUImageMovieWriter *)movieWriter didDropAudioFrameAtTime:(CMTime)frameTime;
+
+- (void)GPUImageMovieWriterDidComplete:(GPUImageMovieWriter *)movieWriter;
+- (void)GPUImageMovieWriter:(GPUImageMovieWriter *)movieWriter didFailWithError:(NSError *)error;
 
 @end
 
@@ -48,6 +55,8 @@ extern NSString *const kGPUImageColorSwizzlingFragmentShaderString;
 @property(nonatomic, copy) NSArray *metaData;
 @property(nonatomic, assign, getter = isPaused) BOOL paused;
 @property(nonatomic, retain) GPUImageContext *movieWriterContext;
+@property(nonatomic, assign) BOOL videoEncodingIsFinished;
+@property(nonatomic, assign) BOOL audioEncodingIsFinished;
 
 // Initialization and teardown
 - (id)initWithMovieURL:(NSURL *)newMovieURL size:(CGSize)newSize;
@@ -56,6 +65,7 @@ extern NSString *const kGPUImageColorSwizzlingFragmentShaderString;
 - (void)setHasAudioTrack:(BOOL)hasAudioTrack audioSettings:(NSDictionary *)audioOutputSettings;
 
 // Movie recording
+- (BOOL)isRecording;
 - (void)startRecording;
 - (void)startRecordingInOrientation:(CGAffineTransform)orientationTransform;
 - (void)finishRecording;
@@ -63,5 +73,9 @@ extern NSString *const kGPUImageColorSwizzlingFragmentShaderString;
 - (void)cancelRecording;
 - (void)processAudioBuffer:(CMSampleBufferRef)audioBuffer;
 - (void)enableSynchronizationCallbacks;
+
+- (void)startSessionAtSourceTime:(CMTime)sourceTime;
+- (void)endSessionAtSourceTime:(CMTime)sourceTime;
+- (void)setOffsetTime:(CMTime)offsetTime;
 
 @end

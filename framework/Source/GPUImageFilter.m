@@ -221,7 +221,7 @@ NSString *const kGPUImagePassthroughFragmentShaderString = SHADER_STRING
 + (const GLfloat *)textureCoordinatesForRotation:(GPUImageRotationMode)rotationMode;
 {
     static const GLfloat noRotationTextureCoordinates[] = {
-        0.0f, 0.0f,
+        0.0f, 0.0f,//bottom left
         1.0f, 0.0f,
         0.0f, 1.0f,
         1.0f, 1.0f,

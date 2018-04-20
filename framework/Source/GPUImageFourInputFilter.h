@@ -12,7 +12,7 @@ extern NSString *const kGPUImageFourInputTextureVertexShaderString;
     GLuint filterSourceTexture4;
     CMTime fourthFrameTime;
     
-    BOOL hasSetThirdTexture, hasReceivedFourthFrame, fourthFrameWasVideo;
+    BOOL hasSetThirdTarget, hasReceivedFourthFrame, fourthFrameWasVideo;
     BOOL fourthFrameCheckDisabled;
 }
 

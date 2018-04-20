@@ -11,7 +11,7 @@ extern NSString *const kGPUImageTwoInputTextureVertexShaderString;
     GPUImageRotationMode inputRotation2;
     CMTime firstFrameTime, secondFrameTime;
     
-    BOOL hasSetFirstTexture, hasReceivedFirstFrame, hasReceivedSecondFrame, firstFrameWasVideo, secondFrameWasVideo;
+    BOOL hasSetFirstTarget, hasReceivedFirstFrame, hasReceivedSecondFrame, firstFrameWasVideo, secondFrameWasVideo;
     BOOL firstFrameCheckDisabled, secondFrameCheckDisabled;
 }
 

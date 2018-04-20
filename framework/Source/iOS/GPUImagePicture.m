@@ -29,11 +29,10 @@
     return self;
 }
 
-- (id)initWithImage:(UIImage *)newImageSource;
+- (id)initWithImage:(UIImage *)newImageSource
 {
-    if (!(self = [self initWithImage:newImageSource smoothlyScaleOutput:NO]))
+    if ((self = [self initWithImage:newImageSource smoothlyScaleOutput:NO]))
     {
-		return nil;
     }
     
     return self;
@@ -75,11 +74,26 @@
 
 - (id)initWithCGImage:(CGImageRef)newImageSource smoothlyScaleOutput:(BOOL)smoothlyScaleOutput removePremultiplication:(BOOL)removePremultiplication;
 {
+    GPUTextureOptions outputTextureOptions;
+    outputTextureOptions.minFilter = GL_LINEAR;
+    outputTextureOptions.magFilter = GL_LINEAR;
+    outputTextureOptions.wrapS = GL_CLAMP_TO_EDGE;
+    outputTextureOptions.wrapT = GL_CLAMP_TO_EDGE;
+    outputTextureOptions.internalFormat = GL_RGBA;
+    outputTextureOptions.format = GL_BGRA;
+    outputTextureOptions.type = GL_UNSIGNED_BYTE;
+    
+    return [self initWithCGImage:newImageSource smoothlyScaleOutput:smoothlyScaleOutput removePremultiplication:removePremultiplication textureOptions:outputTextureOptions];
+}
+
+- (id)initWithCGImage:(CGImageRef)newImageSource smoothlyScaleOutput:(BOOL)smoothlyScaleOutput removePremultiplication:(BOOL)removePremultiplication  textureOptions:(GPUTextureOptions)outputTextureOptions
+{
     if (!(self = [super init]))
     {
 		return nil;
     }
     
+    self.outputTextureOptions = outputTextureOptions;
     hasProcessedImage = NO;
     self.shouldSmoothlyScaleOutput = smoothlyScaleOutput;
     imageUpdateSemaphore = dispatch_semaphore_create(0);
@@ -249,7 +263,9 @@
     runSynchronouslyOnVideoProcessingQueue(^{
         [GPUImageContext useImageProcessingContext];
         
-        outputFramebuffer = [[GPUImageContext sharedFramebufferCache] fetchFramebufferForSize:pixelSizeToUseForTexture onlyTexture:YES];
+        outputFramebuffer = [[GPUImageContext sharedFramebufferCache] fetchFramebufferForSize:pixelSizeToUseForTexture
+                                                                               textureOptions:self.outputTextureOptions
+                                                                                  onlyTexture:YES];
         [outputFramebuffer disableReferenceCounting];
 
         glBindTexture(GL_TEXTURE_2D, [outputFramebuffer texture]);

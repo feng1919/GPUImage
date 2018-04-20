@@ -45,7 +45,7 @@ NSString *const kGPUImageThreeInputTextureVertexShaderString = SHADER_STRING
     
     inputRotation3 = kGPUImageNoRotation;
     
-    hasSetSecondTexture = NO;
+    hasSetSecondTarget = NO;
     
     hasReceivedThirdFrame = NO;
     thirdFrameWasVideo = NO;
@@ -133,11 +133,11 @@ NSString *const kGPUImageThreeInputTextureVertexShaderString = SHADER_STRING
 
 - (NSInteger)nextAvailableTextureIndex;
 {
-    if (hasSetSecondTexture)
+    if (hasSetSecondTarget)
     {
         return 2;
     }
-    else if (hasSetFirstTexture)
+    else if (hasSetFirstTarget)
     {
         return 1;
     }
@@ -147,44 +147,47 @@ NSString *const kGPUImageThreeInputTextureVertexShaderString = SHADER_STRING
     }
 }
 
+- (void)addTarget:(id<GPUImageInput>)newTarget atTextureLocation:(NSInteger)textureLocation {
+    [super addTarget:newTarget atTextureLocation:textureLocation];
+    
+    if (textureLocation == 1) {
+        hasSetSecondTarget = YES;
+    }
+}
+
+- (void)removeTarget:(id<GPUImageInput>)targetToRemove {
+    
+    NSInteger indexOfObject = [targets indexOfObject:targetToRemove];
+    NSInteger textureIndexOfTarget = [[targetTextureIndices objectAtIndex:indexOfObject] integerValue];
+    
+    [super removeTarget:targetToRemove];
+    
+    if (textureIndexOfTarget == 1) {
+        hasSetSecondTarget = NO;
+    }
+}
+
+- (void)removeAllTargets {
+    [super removeAllTargets];
+    hasSetSecondTarget = NO;
+}
+
 - (void)setInputFramebuffer:(GPUImageFramebuffer *)newInputFramebuffer atIndex:(NSInteger)textureIndex;
 {
     if (textureIndex == 0)
     {
         firstInputFramebuffer = newInputFramebuffer;
-        hasSetFirstTexture = YES;
         [firstInputFramebuffer lock];
     }
     else if (textureIndex == 1)
     {
         secondInputFramebuffer = newInputFramebuffer;
-        hasSetSecondTexture = YES;
         [secondInputFramebuffer lock];
     }
     else
     {
         thirdInputFramebuffer = newInputFramebuffer;
         [thirdInputFramebuffer lock];
-    }
-}
-
-- (void)setInputSize:(CGSize)newSize atIndex:(NSInteger)textureIndex;
-{
-    if (textureIndex == 0)
-    {
-        [super setInputSize:newSize atIndex:textureIndex];
-        
-        if (CGSizeEqualToSize(newSize, CGSizeZero))
-        {
-            hasSetFirstTexture = NO;
-        }
-    }
-    else if (textureIndex == 1)
-    {
-        if (CGSizeEqualToSize(newSize, CGSizeZero))
-        {
-            hasSetSecondTexture = NO;
-        }
     }
 }
 

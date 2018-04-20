@@ -5,12 +5,14 @@
 #define MAXSHADERPROGRAMSALLOWEDINCACHE 40
 
 extern dispatch_queue_attr_t GPUImageDefaultQueueAttribute(void);
+static GPUImageContext *sharedImageProcessingContext = nil;
 
 @interface GPUImageContext()
 {
     NSMutableDictionary *shaderProgramCache;
     NSMutableArray *shaderProgramUsageHistory;
     EAGLSharegroup *_sharegroup;
+    void *openGLESContextQueueKey;
 }
 
 @end
@@ -23,18 +25,22 @@ extern dispatch_queue_attr_t GPUImageDefaultQueueAttribute(void);
 @synthesize coreVideoTextureCache = _coreVideoTextureCache;
 @synthesize framebufferCache = _framebufferCache;
 
-static void *openGLESContextQueueKey;
+- (instancetype)init {
+    NSAssert(NO, @"Use -initWithKey:");
+    return nil;
+}
 
-- (id)init;
+- (id)initWithKey:(NSString *)contextKey
 {
     if (!(self = [super init]))
     {
 		return nil;
     }
+    
+    NSAssert([contextKey length] > 0, @"Invalid Key");
 
 	openGLESContextQueueKey = &openGLESContextQueueKey;
-    _contextQueue = dispatch_queue_create("com.sunsetlakesoftware.GPUImage.openGLESContextQueue", GPUImageDefaultQueueAttribute());
-    
+    _contextQueue = dispatch_queue_create([contextKey UTF8String], GPUImageDefaultQueueAttribute());
 #if OS_OBJECT_USE_OBJC
 	dispatch_queue_set_specific(_contextQueue, openGLESContextQueueKey, (__bridge void *)self, NULL);
 #endif
@@ -44,7 +50,11 @@ static void *openGLESContextQueueKey;
     return self;
 }
 
-+ (void *)contextKey {
++ (void *)sharedContextKey {
+    return [[self sharedImageProcessingContext] contextKey];
+}
+
+- (void *)contextKey {
 	return openGLESContextQueueKey;
 }
 
@@ -52,10 +62,8 @@ static void *openGLESContextQueueKey;
 + (GPUImageContext *)sharedImageProcessingContext;
 {
     static dispatch_once_t pred;
-    static GPUImageContext *sharedImageProcessingContext = nil;
-    
     dispatch_once(&pred, ^{
-        sharedImageProcessingContext = [[[self class] alloc] init];
+        sharedImageProcessingContext = [[GPUImageContext alloc] initWithKey:@"com.sunsetlakesoftware.GPUImage.openGLESContextQueue"];
     });
     return sharedImageProcessingContext;
 }

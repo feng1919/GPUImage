@@ -35,11 +35,12 @@ void runSynchronouslyOnVideoProcessingQueue(void (^block)(void))
     if (dispatch_get_current_queue() == videoProcessingQueue)
 #pragma clang diagnostic pop
 #else
-	if (dispatch_get_specific([GPUImageContext contextKey]))
+	if (dispatch_get_specific([GPUImageContext sharedContextKey]))
 #endif
 	{
 		block();
-	}else
+	}
+    else
 	{
 		dispatch_sync(videoProcessingQueue, block);
 	}
@@ -55,11 +56,12 @@ void runAsynchronouslyOnVideoProcessingQueue(void (^block)(void))
     if (dispatch_get_current_queue() == videoProcessingQueue)
 #pragma clang diagnostic pop
 #else
-    if (dispatch_get_specific([GPUImageContext contextKey]))
+    if (dispatch_get_specific([GPUImageContext sharedContextKey]))
 #endif
 	{
 		block();
-	}else
+	}
+    else
 	{
 		dispatch_async(videoProcessingQueue, block);
 	}
@@ -74,11 +76,12 @@ void runSynchronouslyOnContextQueue(GPUImageContext *context, void (^block)(void
     if (dispatch_get_current_queue() == videoProcessingQueue)
 #pragma clang diagnostic pop
 #else
-        if (dispatch_get_specific([GPUImageContext contextKey]))
+        if (dispatch_get_specific([context contextKey]))
 #endif
         {
             block();
-        }else
+        }
+        else
         {
             dispatch_sync(videoProcessingQueue, block);
         }
@@ -94,11 +97,12 @@ void runAsynchronouslyOnContextQueue(GPUImageContext *context, void (^block)(voi
     if (dispatch_get_current_queue() == videoProcessingQueue)
 #pragma clang diagnostic pop
 #else
-        if (dispatch_get_specific([GPUImageContext contextKey]))
+        if (dispatch_get_specific([context contextKey]))
 #endif
         {
             block();
-        }else
+        }
+        else
         {
             dispatch_async(videoProcessingQueue, block);
         }
@@ -204,6 +208,10 @@ void reportAvailableMemoryForGPUImage(NSString *tag)
 	return [NSArray arrayWithArray:targets];
 }
 
+- (NSArray *)targetTextureIndices {
+    return [NSArray arrayWithArray:targetTextureIndices];
+}
+
 - (void)addTarget:(id<GPUImageInput>)newTarget;
 {
     NSInteger nextAvailableTextureIndex = [newTarget nextAvailableTextureIndex];
@@ -224,7 +232,7 @@ void reportAvailableMemoryForGPUImage(NSString *tag)
     
     cachedMaximumOutputSize = CGSizeZero;
     runSynchronouslyOnVideoProcessingQueue(^{
-        [self setInputFramebufferForTarget:newTarget atIndex:textureLocation];
+//        [self setInputFramebufferForTarget:newTarget atIndex:textureLocation];
         [targets addObject:newTarget];
         [targetTextureIndices addObject:[NSNumber numberWithInteger:textureLocation]];
         

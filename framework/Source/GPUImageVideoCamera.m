@@ -26,7 +26,7 @@ void setColorConversion709( GLfloat conversionMatrix[9] )
 	AVCaptureAudioDataOutput *audioOutput;
     NSDate *startingCaptureTime;
 	
-    dispatch_queue_t cameraProcessingQueue, audioProcessingQueue;
+    dispatch_queue_t cameraProcessingQueue, audioProcessingQueue, metaDataProcessingQueue;
     
     GLProgram *yuvConversionProgram;
     GLint yuvConversionPositionAttribute, yuvConversionTextureCoordinateAttribute;
@@ -77,8 +77,11 @@ void setColorConversion709( GLfloat conversionMatrix[9] )
 		return nil;
     }
     
-    cameraProcessingQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH,0);
-	audioProcessingQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW,0);
+    cameraProcessingQueue = dispatch_queue_create("com.bilibili.cameraprocessingqueue", DISPATCH_QUEUE_SERIAL);
+    //dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH,0);
+	audioProcessingQueue = dispatch_queue_create("com.bilibili.audioprocessingqueue", DISPATCH_QUEUE_SERIAL);
+    //dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW,0);
+//    metaDataProcessingQueue = dispatch_queue_create("com.bilibili.facedetectqueue", DISPATCH_QUEUE_SERIAL);
 
     frameRenderingSemaphore = dispatch_semaphore_create(1);
 
@@ -229,6 +232,27 @@ void setColorConversion709( GLfloat conversionMatrix[9] )
     [_captureSession commitConfiguration];
     
 	return self;
+}
+
+- (void)enableMetaDataOutput {
+
+    metaDataProcessingQueue = dispatch_queue_create("com.bilibili.facedetectqueue", DISPATCH_QUEUE_SERIAL);
+    metaDataOutput = [[AVCaptureMetadataOutput alloc] init];
+    [metaDataOutput setMetadataObjectsDelegate:self queue:metaDataProcessingQueue];
+    if ([_captureSession canAddOutput:metaDataOutput]) {
+        [_captureSession addOutput:metaDataOutput];
+    }
+    
+    metaDataOutput.metadataObjectTypes = @[AVMetadataObjectTypeFace];
+}
+
+- (void)disableMetaDataOutput {
+    if (metaDataOutput) {
+        [_captureSession removeOutput:metaDataOutput];
+    }
+    
+    metaDataOutput = nil;
+    metaDataProcessingQueue = nil;
 }
 
 - (GPUImageFramebuffer *)framebufferForOutput;
@@ -888,9 +912,8 @@ void setColorConversion709( GLfloat conversionMatrix[9] )
         CFRetain(sampleBuffer);
         runAsynchronouslyOnVideoProcessingQueue(^{
             //Feature Detection Hook.
-            if (self.delegate)
-            {
-                [self.delegate willOutputSampleBuffer:sampleBuffer];
+            if ([_delegate respondsToSelector:@selector(GPUImageVideoCamera:willOutputSampleBuffer:)]) {
+                [_delegate GPUImageVideoCamera:self willOutputSampleBuffer:sampleBuffer];
             }
             
             [self processVideoSampleBuffer:sampleBuffer];
@@ -898,6 +921,16 @@ void setColorConversion709( GLfloat conversionMatrix[9] )
             CFRelease(sampleBuffer);
             dispatch_semaphore_signal(frameRenderingSemaphore);
         });
+    }
+}
+
+#pragma mark - AVCaptureMetadataOutputObjectsDelegate
+
+- (void)captureOutput:(AVCaptureOutput *)output didOutputMetadataObjects:(NSArray<__kindof AVMetadataObject *> *)metadataObjects
+       fromConnection:(AVCaptureConnection *)connection {
+    
+    if ([_delegate respondsToSelector:@selector(GPUImageVideoCamera:willOutputMetaDataObjects:)]) {
+        [_delegate GPUImageVideoCamera:self willOutputMetaDataObjects:metadataObjects];
     }
 }
 

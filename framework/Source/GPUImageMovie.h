@@ -3,11 +3,24 @@
 #import "GPUImageContext.h"
 #import "GPUImageOutput.h"
 
+typedef NS_ENUM(Byte, GPUImageMovieStatus) {
+    GPUImageMovieStatusLoading,
+    GPUImageMovieStatusPlaying,
+    GPUImageMovieStatusFail,
+    GPUImageMovieStatusFinish,
+    GPUImageMovieStatusCancelled,
+};
+
 /** Protocol for getting Movie played callback.
  */
+@class GPUImageMovie;
 @protocol GPUImageMovieDelegate <NSObject>
 
-- (void)didCompletePlayingMovie;
+@optional
+- (void)GPUImageMovieDidEndPlaying:(GPUImageMovie *)movie status:(GPUImageMovieStatus)status;
+- (BOOL)GPUImageMovie:(GPUImageMovie *)movie shouldProcessVideoSampleBuffer:(CMSampleBufferRef)sampleBuffer frameTime:(CMTime)frameTime;
+- (BOOL)GPUImageMovie:(GPUImageMovie *)movie shouldProcessAudioSampleBuffer:(CMSampleBufferRef)sampleBuffer frameTime:(CMTime)frameTime;
+
 @end
 
 /** Source object for filtering movies
@@ -17,6 +30,10 @@
 @property (readwrite, retain) AVAsset *asset;
 @property (readwrite, retain) AVPlayerItem *playerItem;
 @property(readwrite, retain) NSURL *url;
+
+@property (nonatomic, assign) GPUImageRotationMode outputOrientation;
+
+@property (atomic, assign) GPUImageMovieStatus status;
 
 /** This enables the benchmarking mode, which logs out instantaneous and average frame times to the console
  */
@@ -40,8 +57,11 @@
 @property (readwrite, nonatomic, assign) id <GPUImageMovieDelegate>delegate;
 
 @property (readonly, nonatomic) AVAssetReader *assetReader;
-@property (readonly, nonatomic) BOOL audioEncodingIsFinished;
-@property (readonly, nonatomic) BOOL videoEncodingIsFinished;
+@property (assign, atomic) BOOL audioEncodingIsFinished;
+@property (assign, atomic) BOOL videoEncodingIsFinished;
+
+@property (nonatomic, assign) BOOL synchronizedDecoding;
+@property (nonatomic, assign) BOOL shouldDecodingAudio;
 
 /// @name Initialization and teardown
 - (id)initWithAsset:(AVAsset *)asset;
@@ -50,10 +70,12 @@
 - (void)yuvConversionSetup;
 
 /// @name Movie processing
-- (void)enableSynchronizedEncodingUsingMovieWriter:(GPUImageMovieWriter *)movieWriter;
+- (BOOL)readNextVideoFrameFromCurrentOutput;
+- (BOOL)readNextAudioSampleFromCurrentOutput;
 - (BOOL)readNextVideoFrameFromOutput:(AVAssetReaderOutput *)readerVideoTrackOutput;
 - (BOOL)readNextAudioSampleFromOutput:(AVAssetReaderOutput *)readerAudioTrackOutput;
 - (void)startProcessing;
+- (void)startProcessingWithCompletion:(void (^)(BOOL success))completion;
 - (void)endProcessing;
 - (void)cancelProcessing;
 - (void)processMovieFrame:(CMSampleBufferRef)movieSampleBuffer; 

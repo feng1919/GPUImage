@@ -10,19 +10,20 @@ void setColorConversion601( GLfloat conversionMatrix[9] );
 void setColorConversion601FullRange( GLfloat conversionMatrix[9] );
 void setColorConversion709( GLfloat conversionMatrix[9] );
 
-
+@class GPUImageVideoCamera;
 //Delegate Protocal for Face Detection.
 @protocol GPUImageVideoCameraDelegate <NSObject>
 
 @optional
-- (void)willOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer;
+- (void)GPUImageVideoCamera:(GPUImageVideoCamera *)videoCamera willOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer;
+- (void)GPUImageVideoCamera:(GPUImageVideoCamera *)videoCamera willOutputMetaDataObjects:(NSArray<__kindof AVMetadataObject *> *)metaDataObjects;
 @end
 
 
 /**
  A GPUImageOutput that provides frames from either camera
 */
-@interface GPUImageVideoCamera : GPUImageOutput <AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate>
+@interface GPUImageVideoCamera : GPUImageOutput <AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, AVCaptureMetadataOutputObjectsDelegate>
 {
     NSUInteger numberOfFramesCaptured;
     CGFloat totalFrameTimeDuringCapture;
@@ -32,6 +33,7 @@ void setColorConversion709( GLfloat conversionMatrix[9] );
     AVCaptureDevice *_microphone;
     AVCaptureDeviceInput *videoInput;
 	AVCaptureVideoDataOutput *videoOutput;
+    AVCaptureMetadataOutput *metaDataOutput;
 
     BOOL capturePaused;
     GPUImageRotationMode outputRotation, internalRotation;
@@ -147,6 +149,9 @@ void setColorConversion709( GLfloat conversionMatrix[9] );
 /** When benchmarking is enabled, this will keep a running average of the time from uploading, processing, and final recording or display
  */
 - (CGFloat)averageFrameDurationDuringCapture;
+
+- (void)enableMetaDataOutput;
+- (void)disableMetaDataOutput;
 
 - (void)resetBenchmarkAverage;
 
